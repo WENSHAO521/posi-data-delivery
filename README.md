@@ -102,39 +102,47 @@ fetch('https://data.posi.panorama-sg.com/current.json')
   .then(({ manifest }) => fetch(`https://data.posi.panorama-sg.com${manifest}`))
 ```
 
-(Custom domain pending DNS setup — see below. Until then, this repo's
-default GitHub Pages URL works identically:
-`https://wenshao521.github.io/posi-data-delivery/`.)
+**Live now** at the default GitHub Pages URL:
+`https://wenshao521.github.io/posi-data-delivery/` (verified — `current.json`,
+`manifest.json`, and all three collection files return 200). The custom
+domain in the example above is not live yet — see below.
 
 ## Custom domain (`data.posi.panorama-sg.com`) — manual step, not automatable here
 
-GitHub Pages is enabled on this repo with `CNAME` set to
-`data.posi.panorama-sg.com`. For the domain to actually resolve, whoever
-manages DNS for `panorama-sg.com` needs to add, at the registrar/DNS
-provider:
+**Do the DNS step below first, then add the custom domain — not the other
+order.** Adding a `CNAME` file / setting the custom domain in repo settings
+before the DNS record exists makes GitHub Pages force-redirect the
+working default URL above to the not-yet-resolving custom domain,
+breaking the only usable URL in the meantime (this repo hit exactly that
+and reverted it — see commit history).
 
-```
-Type:  CNAME
-Name:  data.posi
-Value: wenshao521.github.io
-```
+1. Whoever manages DNS for `panorama-sg.com` adds, at the registrar/DNS
+   provider:
 
-Then enable **Settings → Pages → Enforce HTTPS** once GitHub reports the
-domain as verified (can take up to 24h for DNS to propagate). This step
-requires access to the `panorama-sg.com` DNS zone, which is outside this
-repository/CI — nothing here can complete it automatically.
+   ```
+   Type:  CNAME
+   Name:  data.posi
+   Value: wenshao521.github.io
+   ```
+
+2. Once that record has propagated (can take up to 24h), set the custom
+   domain: **Settings → Pages → Custom domain → `data.posi.panorama-sg.com`**
+   (or `gh api repos/WENSHAO521/posi-data-delivery/pages -X PUT -f cname=data.posi.panorama-sg.com`),
+   which writes the `CNAME` file back.
+3. Enable **Settings → Pages → Enforce HTTPS** once GitHub reports the
+   domain as verified.
+
+This requires access to the `panorama-sg.com` DNS zone, which is outside
+this repository/CI — nothing here can complete step 1 automatically.
 
 ## CORS
 
-GitHub Pages serves static assets with a permissive `Access-Control-Allow-Origin: *`
-by default, which is why a browser `fetch()` from `posi.panorama-sg.com`
-against this domain is expected to work without a proxy. Not independently
-re-verified against the custom domain yet (pending the DNS step above) —
-confirm this holds once `data.posi.panorama-sg.com` is live before relying
-on it in production frontend code; GitHub Pages doesn't support custom
-response headers (no way to configure this ourselves either way — see
-GitHub's own community discussion on the topic), so there's no fallback
-tuning available if it doesn't.
+Confirmed against the live default URL: GitHub Pages serves this repo's
+files with `Access-Control-Allow-Origin: *`, so a browser `fetch()` from
+`posi.panorama-sg.com` works without a proxy. Re-confirm once the custom
+domain is live (step 2 above) — GitHub Pages doesn't support custom
+response headers, so there's no way to tune this ourselves if the custom
+domain ever behaves differently.
 
 ## GitHub Pages limits (per GitHub's published limits, as of this writing)
 
