@@ -1,0 +1,7 @@
+{
+  "type": "pre_release_data_snapshot",
+  "is_official_release": false,
+  "snapshot": "2026-08-13",
+  "manifest": "/snapshots/2026-08-13/manifest.json",
+  "note": "No POSI-R-* release exists yet -- this points at the current pre-release data snapshot, refreshed on demand rather than on a fixed schedule. See manifest.json for exact provenance (data_commit/engine_commit) and per-component versions."
+}
