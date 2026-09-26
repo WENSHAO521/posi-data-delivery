@@ -1,0 +1,69 @@
+name: Sync snapshot from posi-data
+
+# Builds a new data snapshot from posi-data (public) whenever posi-data has
+# changed since the current snapshot, using posi-data's own
+# scripts/publish-data-snapshot.mjs. Writes only to this repository, with its
+# own token. Snapshots are immutable: a second snapshot on the same day gets
+# the next free id (YYYY-MM-DD-2, -3, ...), and nothing is published when
+# posi-data has not changed.
+
+on:
+  schedule:
+    - cron: '30 3 * * *'   # daily, 03:30 UTC, after posi-data's import
+  workflow_dispatch:
+
+concurrency:
+  group: sync-from-posi-data
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check out posi-data
+        uses: actions/checkout@v4
+        with:
+          repository: WENSHAO521/posi-data
+          path: _posi-data
+
+      - name: Decide whether a new snapshot is needed
+        id: decide
+        run: |
+          set -euo pipefail
+          DATA_SHA=$(git -C _posi-data rev-parse HEAD)
+          CURRENT=$(node -e "const c=require('./current.json');const m=require('.'+c.manifest);console.log(m.data_commit||'')")
+          if [ "$DATA_SHA" = "$CURRENT" ]; then
+            echo "posi-data unchanged ($DATA_SHA); nothing to publish"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ID=$(date -u +%Y-%m-%d); N=1
+          while [ -d "snapshots/$ID" ]; do N=$((N+1)); ID="$(date -u +%Y-%m-%d)-$N"; done
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "engine=$(git ls-remote https://github.com/WENSHAO521/posi-engine HEAD | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Build snapshot
+        if: steps.decide.outputs.publish == 'true'
+        working-directory: _posi-data
+        run: node scripts/publish-data-snapshot.mjs --out .. --snapshot-id ${{ steps.decide.outputs.id }} --engine-commit ${{ steps.decide.outputs.engine }}
+
+      - name: Commit
+        if: steps.decide.outputs.publish == 'true'
+        run: |
+          rm -rf _posi-data
+          git config user.name  "posi-delivery-bot"
+          git config user.email "posi-delivery-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "Publish snapshot ${{ steps.decide.outputs.id }}"
+          git push
