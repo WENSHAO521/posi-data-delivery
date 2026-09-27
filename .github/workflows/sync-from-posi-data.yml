@@ -1,15 +1,21 @@
 name: Sync snapshot from posi-data
 
-# Builds a new data snapshot from posi-data (public) whenever posi-data has
-# changed since the current snapshot, using posi-data's own
+# Builds a new data snapshot from posi-data (public) whenever posi-data's
+# published data has changed since the current snapshot, using posi-data's own
 # scripts/publish-data-snapshot.mjs. Writes only to this repository, with its
 # own token. Snapshots are immutable: a second snapshot on the same day gets
-# the next free id (YYYY-MM-DD-2, -3, ...), and nothing is published when
-# posi-data has not changed.
+# the next free id (YYYY-MM-DD-2, -3, ...).
+#
+# It checks every three hours rather than once a day at a fixed time: GitHub
+# delays scheduled runs by hours and sometimes drops them, so a single daily
+# slot timed "after posi-data's import" is not dependable. A check with nothing
+# new exits in seconds. "Changed" means the collection files differ (their
+# SHA-256 against the current snapshot's SHA256SUMS), so a documentation-only
+# commit in posi-data publishes nothing.
 
 on:
   schedule:
-    - cron: '30 3 * * *'   # daily, 03:30 UTC, after posi-data's import
+    - cron: '23 */3 * * *'   # every three hours
   workflow_dispatch:
 
 concurrency:
@@ -41,9 +47,11 @@ jobs:
         run: |
           set -euo pipefail
           DATA_SHA=$(git -C _posi-data rev-parse HEAD)
-          CURRENT=$(node -e "const c=require('./current.json');const m=require('.'+c.manifest);console.log(m.data_commit||'')")
-          if [ "$DATA_SHA" = "$CURRENT" ]; then
-            echo "posi-data unchanged ($DATA_SHA); nothing to publish"
+          # Collection checksums posi-data would publish now, against the current snapshot's.
+          (cd _posi-data && node scripts/publish-data-snapshot.mjs --checksums-only) > "$RUNNER_TEMP/next.json"
+          CHANGED=$(node scripts/collections-changed.mjs "$RUNNER_TEMP/next.json")
+          if [ "$CHANGED" = "no" ]; then
+            echo "posi-data $DATA_SHA: collections unchanged since $(node -p "require('./current.json').snapshot"); nothing to publish" | tee -a "$GITHUB_STEP_SUMMARY"
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -67,3 +75,4 @@ jobs:
           git add -A
           git commit -m "Publish snapshot ${{ steps.decide.outputs.id }}"
           git push
+          echo "Published snapshot ${{ steps.decide.outputs.id }}: $(node -p "const c=require('./current.json');c.type+(c.release?' '+c.release:'')")" >> "$GITHUB_STEP_SUMMARY"
