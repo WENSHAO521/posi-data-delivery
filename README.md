@@ -10,20 +10,22 @@ megabyte JSON files into its own Git history and Cloudflare Pages
 deployment (see that repo's `sync-corpus.mjs` header for the incident that
 motivated moving data out of the frontend deployment in the first place).
 
-## What this is not
+## Releases and snapshots
 
-**Not a POSI-R release.** [`POSI-R-1.0-SPEC.md`](https://github.com/WENSHAO521/posi-data/blob/master/POSI-R-1.0-SPEC.md)
-defines POSI's platform-release format and is explicit that none has ever
-been produced — no pinned end-to-end engine run, no reviewed manifest, no
-human-triggered "cut" decision. Every `manifest.json` published here has
-`is_official_release: false` and `release: null` for exactly that reason.
-What's published instead is a **pre-release data snapshot**: an as-is
-mirror of whatever is currently committed to posi-data's `corpus/`,
-refreshed on demand. When a real POSI-R release is eventually cut, it will
-be published here too — under `releases/POSI-R-{name}/` alongside (not
-replacing) the `snapshots/` this README describes, and `current.json` will
-point to it. Nothing here should be described publicly as "the current
-POSI-R release" until that happens.
+**Releases.** [`POSI-R-1.0-SPEC.md`](https://github.com/WENSHAO521/posi-data/blob/master/POSI-R-1.0-SPEC.md)
+defines POSI's platform release. The first, **POSI-R-2026.1**, was
+published on 2026-09-27. Each release's reviewed manifest is committed to
+posi-data's `releases/` and mirrored here under `releases/<release>/`. A
+snapshot whose collections are byte-identical to the newest release (the
+manifest's `files` checksums) is published as that release:
+`type: "official_release"`, `is_official_release: true`,
+`release: "POSI-R-2026.1"`.
+
+**Snapshots.** Every publication is a snapshot of whatever is committed to
+posi-data. One built from data changed since the latest release is a
+`post_release_data_snapshot`: `is_official_release: false`, with
+`latest_release` naming the release it follows. Cite a release by its
+name, and a snapshot by its id.
 
 **Not editable in place.** Once a snapshot directory is written, it is
 never modified — a newer or corrected snapshot gets a new
@@ -33,7 +35,9 @@ recorded a specific snapshot id can always fetch exactly what they saw.
 ## Layout
 
 ```
-current.json                              -- points at the latest snapshot
+current.json                              -- points at the latest snapshot and names the latest release
+releases/
+  POSI-R-2026.1/manifest.json             -- release manifest, mirrored from posi-data
 snapshots/
   2026-08-13/
     manifest.json                         -- provenance + component versions
@@ -48,10 +52,13 @@ snapshots/
 
 ```json
 {
-  "type": "pre_release_data_snapshot",
-  "is_official_release": false,
-  "snapshot": "2026-08-13",
-  "manifest": "/snapshots/2026-08-13/manifest.json",
+  "type": "official_release",
+  "is_official_release": true,
+  "release": "POSI-R-2026.1",
+  "latest_release": "POSI-R-2026.1",
+  "latest_release_manifest": "/releases/POSI-R-2026.1/manifest.json",
+  "snapshot": "2026-09-27",
+  "manifest": "/snapshots/2026-09-27/manifest.json",
   "note": "..."
 }
 ```
@@ -63,12 +70,8 @@ the only file in this repo that's expected to change in place.
 `manifest.json` mirrors POSI-R-1.0-SPEC.md § 4's field set (`lifecycle_version`,
 `psc_crosswalk_version`, `ajr_e_version`, `ajr_m_version`, `rank_version`,
 `evidence_version`, `diagnostics_version`, `pcs_version`, `pci_version`,
-`pjr_release`, `data_commit`, `engine_commit`, plus count fields) so that
-upgrading a future snapshot into a real POSI-R release is a rename, not a
-redesign. A component not yet backed by real data reports an explicit
-`"Pending"` (never an omitted field) — currently `pci_version` and
-`pcs_version`, since neither the real PCI pipeline nor the uncapped PCS
-1.0 Crossref ETL has been run yet.
+`pjr_release`, `data_commit`, `engine_commit`, plus count fields) . A component not yet backed by real data reports an explicit
+`"Pending"` (never an omitted field).
 
 `data_commit` is the exact posi-data git SHA the snapshot's `corpus/`
 files were read from. `engine_commit` is the posi-engine commit the
