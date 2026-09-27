@@ -1,10 +1,10 @@
 {
-  "type": "official_release",
-  "is_official_release": true,
-  "release": "POSI-R-2026.1",
+  "type": "post_release_data_snapshot",
+  "is_official_release": false,
+  "release": null,
   "latest_release": "POSI-R-2026.1",
   "latest_release_manifest": "/releases/POSI-R-2026.1/manifest.json",
-  "snapshot": "2026-09-27",
-  "manifest": "/snapshots/2026-09-27/manifest.json",
-  "note": "The current data is official release POSI-R-2026.1. See manifest.json for exact provenance (data_commit/engine_commit) and per-component versions."
+  "snapshot": "2026-09-27-2",
+  "manifest": "/snapshots/2026-09-27-2/manifest.json",
+  "note": "Points at a data snapshot updated since release POSI-R-2026.1. See manifest.json for exact provenance."
 }
