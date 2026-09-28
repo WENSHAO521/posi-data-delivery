@@ -82,7 +82,7 @@ the record and are not evaluation results.
 
 ## How snapshots are published
 
-`.github/workflows/sync-from-posi-data.yml` runs every three hours. It checks
+`.github/workflows/sync-from-posi-data.yml` runs every 20 minutes. It checks
 out posi-data, compares the checksums of the collections posi-data would
 publish (`publish-data-snapshot.mjs --checksums-only`) with the current
 snapshot (`scripts/collections-changed.mjs`), and only when they differ builds

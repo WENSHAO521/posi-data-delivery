@@ -6,16 +6,16 @@ name: Sync snapshot from posi-data
 # own token. Snapshots are immutable: a second snapshot on the same day gets
 # the next free id (YYYY-MM-DD-2, -3, ...).
 #
-# It checks every three hours rather than once a day at a fixed time: GitHub
-# delays scheduled runs by hours and sometimes drops them, so a single daily
-# slot timed "after posi-data's import" is not dependable. A check with nothing
-# new exits in seconds. "Changed" means the collection files differ (their
+# It checks every 20 minutes, 6 minutes after posi-data's import-global-index,
+# so new data is published within minutes rather than hours. GitHub delays
+# scheduled runs and sometimes drops them, so frequent checks are also what
+# makes the chain dependable. A check with nothing new exits in seconds. "Changed" means the collection files differ (their
 # SHA-256 against the current snapshot's SHA256SUMS), so a documentation-only
 # commit in posi-data publishes nothing.
 
 on:
   schedule:
-    - cron: '23 */3 * * *'   # every three hours
+    - cron: '8,28,48 * * * *'   # every 20 minutes, 6 minutes after posi-data's import
   workflow_dispatch:
 
 concurrency:
