@@ -46,7 +46,25 @@ snapshots/
       core-collection.json                -- POSI Core Collection (small)
       benchmark-curated.json              -- Global Benchmark curated seed
       publisher-catalog.json              -- Global Benchmark publisher-catalog expansion (large)
+      pcs.json, pci.json                  -- PCS and PCI indicator records
+      citation-ranking.json.gz            -- POSI Citation Ranking edition (POSI-EVAL-1.0: PNCI-1.0,
+                                             CITATION-RANK-1.0, POSI-ZONES-2.0), from snapshots after
+                                             the first PNCI-1.0 cycle; the only ranking POSI publishes
+      pcs-q.json.gz                       -- PCS edition: PCS values. Its PCS-Q rank, percentile and
+                                             quartile fields are retired and are not an evaluation result
+      citation-rankings.json              -- archive of the retired PCI-based Citation Q (2 records)
 ```
+
+**Evaluation architecture.** Since 2026-09-28 POSI evaluates journals in five
+layers ([POSI-EVAL-1.0-SPEC.md](https://github.com/WENSHAO521/posi-data/blob/master/POSI-EVAL-1.0-SPEC.md)):
+PQF (Core Collection eligibility), AJR (AJR Score + AJR Rating A+ … D, in each
+corpus record's `early_stage_rating.rating`), the PCI/PNCI/PCS indicators, the
+Citation Ranking (rank, percentile, Citation Quartile Q1–Q4, displayed C-Q1–C-Q4,
+from PNCI within the PSC category) and POSI Zones. Legacy E-Q/M-Q quartile fields
+in the corpus and PCS-Q fields in `pcs-q.json.gz` are kept for the record only.
+Snapshot manifests from then on carry `evaluation_version`,
+`citation_rank_version`, `pnci_version`, `zones_version` and
+`ranking_snapshot_date`.
 
 `current.json`:
 
