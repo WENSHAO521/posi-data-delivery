@@ -12,6 +12,11 @@ name: Sync snapshot from posi-data
 # makes the chain dependable. A check with nothing new exits in seconds. "Changed" means the collection files differ (their
 # SHA-256 against the current snapshot's SHA256SUMS), so a documentation-only
 # commit in posi-data publishes nothing.
+#
+# Snapshot data is not kept in git: each snapshot's collection files go to a
+# GitHub release, snapshot-<id> (scripts/release-snapshots.sh), and only its
+# manifest.json and SHA256SUMS are committed. The Pages deploy downloads what
+# it serves from those releases.
 
 on:
   schedule:
@@ -28,7 +33,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -70,13 +75,23 @@ jobs:
         if: steps.decide.outputs.publish == 'true'
         run: node scripts/build-downloads.mjs snapshots/${{ steps.decide.outputs.id }}
 
+      - name: Move snapshot data to releases
+        # Every run, so a snapshot whose earlier move failed is retried.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release-snapshots.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Commit
-        if: steps.decide.outputs.publish == 'true'
         run: |
           rm -rf _posi-data
           git config user.name  "posi-delivery-bot"
           git config user.email "posi-delivery-bot@users.noreply.github.com"
           git add -A
-          git commit -m "Publish snapshot ${{ steps.decide.outputs.id }}"
+          if git diff --staged --quiet; then exit 0; fi
+          if [ "${{ steps.decide.outputs.publish }}" = "true" ]; then
+            git commit -m "Publish snapshot ${{ steps.decide.outputs.id }}"
+            echo "Published snapshot ${{ steps.decide.outputs.id }}: $(node -p "const c=require('./current.json');c.type+(c.release?' '+c.release:'')")" >> "$GITHUB_STEP_SUMMARY"
+          else
+            git commit -m "Move snapshot data to releases"
+          fi
           git push
-          echo "Published snapshot ${{ steps.decide.outputs.id }}: $(node -p "const c=require('./current.json');c.type+(c.release?' '+c.release:'')")" >> "$GITHUB_STEP_SUMMARY"

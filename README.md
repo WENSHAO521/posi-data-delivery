@@ -51,6 +51,16 @@ site/v1/                             the POSI website's data files (journal prof
 deploy.json                          what the live deploy contains
 ```
 
+Snapshot collections are not kept in git either. Each snapshot's collection
+files, with its manifest.json and SHA256SUMS, are published as the GitHub
+release `snapshot-<snapshot-id>`
+(`https://github.com/WENSHAO521/posi-data-delivery/releases/download/snapshot-<id>/<file>`);
+this repository keeps only each snapshot's manifest.json and SHA256SUMS.
+data.posi.panorama-sg.com serves the collections of the current snapshot, of
+each release's snapshot and of the three newest others; older snapshots are
+served as manifest.json and SHA256SUMS, with their collections in their
+releases.
+
 `site/` and `deploy.json` are not in this repository: the Pages deploy
 (`.github/workflows/deploy-pages.yml`, Settings > Pages > Source: GitHub
 Actions) adds the website's data from its `site-data` release on each deploy,
