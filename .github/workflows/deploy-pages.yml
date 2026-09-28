@@ -1,0 +1,91 @@
+name: Deploy data layer
+
+# Publishes https://data.posi.panorama-sg.com with GitHub Pages ("Source:
+# GitHub Actions" in Settings > Pages). The site is assembled on each deploy
+# (scripts/assemble-pages.mjs) from this repository (current.json, releases,
+# snapshots, ranking downloads) and the POSI website's data files, which its
+# publish-site-data workflow uploads to its `site-data` release; they are
+# served at /site/v1/. The website's data is therefore not committed here,
+# and this repository does not grow with it.
+#
+# Deploys on a push to main or a dispatch; after each snapshot check (Sync
+# snapshot from posi-data) and every 20 minutes, it deploys only when this
+# repository's main or the site data differ from the live deploy.json. If the site data cannot be downloaded the deploy fails and
+# the previous one stays live.
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ['Sync snapshot from posi-data']
+    types: [completed]
+  schedule:
+    - cron: '4,24,44 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  FORMAT: v1
+  SITE_DATA: https://github.com/WENSHAO521/Panorama-Open-Scholarly-Index/releases/download/site-data
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Decide whether to deploy
+        id: decide
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 "$SITE_DATA/site-data-$FORMAT.json" -o stamp.json
+          next="$GITHUB_SHA $(node -p "require('./stamp.json').commit")"
+          live=$(curl -fsSL --retry 2 https://data.posi.panorama-sg.com/deploy.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.delivery_commit+' '+j.site_data.commit)}catch{console.log('')}})" || true)
+          case "${{ github.event_name }}" in
+            schedule|workflow_run)
+              if [ "$next" = "$live" ]; then
+                echo "This repository and the site data are already live ($next); nothing to deploy" | tee -a "$GITHUB_STEP_SUMMARY"
+                echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+              fi ;;
+          esac
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.decide.outputs.deploy == 'true'
+        with:
+          path: repo
+
+      - name: Assemble
+        if: steps.decide.outputs.deploy == 'true'
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          # The stamp is read first: if the archive is replaced in between, the
+          # newer stamp differs from the deployed one and the next check deploys again.
+          curl -fsSL --retry 3 "$SITE_DATA/site-data-$FORMAT.json" -o ../stamp.json
+          curl -fsSL --retry 3 "$SITE_DATA/site-data-$FORMAT.tar.gz" -o ../site-data.tar.gz
+          mkdir -p ../site-data && tar -xzf ../site-data.tar.gz -C ../site-data
+          node scripts/assemble-pages.mjs ../site-data ../stamp.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/configure-pages@v5
+        if: steps.decide.outputs.deploy == 'true'
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.decide.outputs.deploy == 'true'
+        with:
+          path: repo/_site
+
+      - name: Deploy
+        id: deployment
+        if: steps.decide.outputs.deploy == 'true'
+        uses: actions/deploy-pages@v4

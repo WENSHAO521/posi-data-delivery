@@ -45,7 +45,16 @@ downloads/rankings/                  Citation Ranking downloads, one set per edi
   citation-<year>.csv                ranked journals (official and provisional)
   citation-<year>-all.csv            every journal of the edition, all statuses
   citation-<year>-<category>.json    one PSC category ("unclassified": none)
+site/v1/                             the POSI website's data files (journal profiles,
+                                     title index, directory, publishers, records);
+                                     format v1, read by posi.panorama-sg.com
+deploy.json                          what the live deploy contains
 ```
+
+`site/` and `deploy.json` are not in this repository: the Pages deploy
+(`.github/workflows/deploy-pages.yml`, Settings > Pages > Source: GitHub
+Actions) adds the website's data from its `site-data` release on each deploy,
+so the repository does not grow with it.
 
 `downloads/` is rebuilt from each new snapshot by `scripts/build-downloads.mjs`
 and changes in place (an unchanged edition rewrites identical files). The POSI
