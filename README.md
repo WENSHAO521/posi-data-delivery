@@ -40,7 +40,16 @@ snapshots/<snapshot-id>/
     citation-ranking.json.gz         POSI Citation Ranking edition (PNCI-1.0), from the first PNCI cycle on
     pcs-q.json.gz                    PCS edition: PCS values (its PCS-Q quartiles are retired)
     citation-rankings.json           archive of the retired PCI-based Citation Q
+downloads/rankings/                  Citation Ranking downloads, one set per edition year
+  citation-<year>.json               edition versions, thresholds and file list
+  citation-<year>.csv                ranked journals (official and provisional)
+  citation-<year>-all.csv            every journal of the edition, all statuses
+  citation-<year>-<category>.json    one PSC category ("unclassified": none)
 ```
+
+`downloads/` is rebuilt from each new snapshot by `scripts/build-downloads.mjs`
+and changes in place (an unchanged edition rewrites identical files). The POSI
+website links these files for its ranking downloads.
 
 Large collections are gzipped (gzip without a timestamp, so the same content
 always has the same checksum).

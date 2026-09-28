@@ -66,6 +66,10 @@ jobs:
         working-directory: _posi-data
         run: node scripts/publish-data-snapshot.mjs --out .. --snapshot-id ${{ steps.decide.outputs.id }} --engine-commit ${{ steps.decide.outputs.engine }}
 
+      - name: Build ranking downloads
+        if: steps.decide.outputs.publish == 'true'
+        run: node scripts/build-downloads.mjs snapshots/${{ steps.decide.outputs.id }}
+
       - name: Commit
         if: steps.decide.outputs.publish == 'true'
         run: |
