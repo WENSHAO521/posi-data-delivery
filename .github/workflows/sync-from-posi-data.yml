@@ -17,6 +17,11 @@ name: Sync snapshot from posi-data
 # GitHub release, snapshot-<id> (scripts/release-snapshots.sh), and only its
 # manifest.json and SHA256SUMS are committed. The Pages deploy downloads what
 # it serves from those releases.
+#
+# Each year's Citation Ranking edition is archived the same way, frozen, as
+# the release ranking-<year> (a later change to that year's edition becomes
+# ranking-<year>-r1, -r2 ...; scripts/release-rankings.sh), and the Pages
+# deploy serves the newest archive of every year under /downloads/rankings/.
 
 on:
   schedule:
@@ -71,15 +76,18 @@ jobs:
         working-directory: _posi-data
         run: node scripts/publish-data-snapshot.mjs --out .. --snapshot-id ${{ steps.decide.outputs.id }} --engine-commit ${{ steps.decide.outputs.engine }}
 
-      - name: Build ranking downloads
-        if: steps.decide.outputs.publish == 'true'
-        run: node scripts/build-downloads.mjs snapshots/${{ steps.decide.outputs.id }}
-
       - name: Move snapshot data to releases
         # Every run, so a snapshot whose earlier move failed is retried.
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/release-snapshots.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive the Citation Ranking edition
+        # Every run: publishes ranking-<year> (or a revision) only when the
+        # current snapshot holds an edition no archive holds yet.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release-rankings.sh | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Commit
         run: |
