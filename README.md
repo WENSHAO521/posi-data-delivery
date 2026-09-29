@@ -40,7 +40,9 @@ snapshots/<snapshot-id>/
     citation-ranking.json.gz         POSI Citation Ranking edition (PNCI-1.0), from the first PNCI cycle on
     pcs-q.json.gz                    PCS edition: PCS values (its PCS-Q quartiles are retired)
     citation-rankings.json           archive of the retired PCI-based Citation Q
-downloads/rankings/                  Citation Ranking downloads, one set per edition year
+downloads/rankings/                  Citation Ranking downloads, the newest archive of each year
+  index.json                         every edition: year, archive, versions, counts, files
+  citation-ranking-<year>.json.gz    the edition itself, as published
   citation-<year>.json               edition versions, thresholds and file list
   citation-<year>.csv                ranked journals (official and provisional)
   citation-<year>-all.csv            every journal of the edition, all statuses
@@ -66,9 +68,12 @@ releases.
 Actions) adds the website's data from its `site-data` release on each deploy,
 so the repository does not grow with it.
 
-`downloads/` is rebuilt from each new snapshot by `scripts/build-downloads.mjs`
-and changes in place (an unchanged edition rewrites identical files). The POSI
-website links these files for its ranking downloads.
+Each year's Citation Ranking edition is frozen as the GitHub release
+`ranking-<year>` (`scripts/release-rankings.sh`, run on every sync) holding
+all the files above and their SHA256SUMS. A published archive is never
+replaced: if a year's edition changes later, it is published as
+`ranking-<year>-r1`, `-r2` ..., and every earlier archive stays available.
+`/downloads/rankings/` serves the newest archive of every year.
 
 Large collections are gzipped (gzip without a timestamp, so the same content
 always has the same checksum).

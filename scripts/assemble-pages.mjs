@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Assembles the GitHub Pages site for data.posi.panorama-sg.com into _site/:
 //
-//   current.json, releases/, downloads/              from this repository
+//   current.json, releases/                          from this repository
+//   downloads/rankings/                               the newest archive of each year's
+//                                                     Citation Ranking (ranking-<year>[-r<n>]
+//                                                     releases), with index.json listing them
 //   snapshots/                                        manifests from this repository; the
 //                                                     collections of the snapshots served
 //                                                     whole, from their snapshot-<id> releases
@@ -77,6 +80,64 @@ for (const id of snapshots) {
   }
 }
 
+// Citation Ranking downloads: the newest archive of each year, verified
+// against its SHA256SUMS. Before the first archive exists, the repository's
+// downloads/ (copied above) is served as it is.
+const api = async path => {
+  const res = await fetch(`https://api.github.com/repos/${REPO}/${path}`, { headers: { 'user-agent': 'posi-data-delivery', accept: 'application/vnd.github+json', ...(process.env.GH_TOKEN ? { authorization: `Bearer ${process.env.GH_TOKEN}` } : {}) } })
+  if (!res.ok) throw new Error(`GitHub API ${path}: ${res.status}`)
+  return res.json()
+}
+const releases = []
+for (let page = 1; ; page++) {
+  const batch = await api(`releases?per_page=100&page=${page}`)
+  releases.push(...batch)
+  if (batch.length < 100) break
+}
+const archives = new Map()
+for (const r of releases) {
+  const m = r.tag_name.match(/^ranking-(\d{4})(?:-r(\d+))?$/)
+  if (!m || r.draft) continue
+  const y = Number(m[1]), rev = Number(m[2] ?? 0)
+  const a = archives.get(y) ?? { tags: [] }
+  a.tags.push({ tag: r.tag_name, rev, published_at: r.published_at })
+  if (a.release == null || rev > a.rev) Object.assign(a, { release: r, rev })
+  archives.set(y, a)
+}
+const editions = []
+if (archives.size) {
+  const dl = join(OUT, 'downloads', 'rankings')
+  rmSync(dl, { recursive: true, force: true })
+  mkdirSync(dl, { recursive: true })
+  const get = async url => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const res = await fetch(url).catch(() => null)
+      if (res?.ok) return Buffer.from(await res.arrayBuffer())
+    }
+    throw new Error(`cannot download ${url}`)
+  }
+  for (const [y, a] of [...archives].sort(([x], [z]) => z - x)) {
+    const assets = new Map(a.release.assets.map(x => [x.name, x.browser_download_url]))
+    const sums = (await get(assets.get('SHA256SUMS'))).toString('utf-8').trim().split('\n').map(l => l.trim().split(/\s+/))
+    for (const [hash, name] of sums) {
+      const body = await get(assets.get(name))
+      if (createHash('sha256').update(body).digest('hex') !== hash) throw new Error(`${a.release.tag_name}/${name}: checksum differs`)
+      if (name !== 'SHA256SUMS' && name !== 'EDITION.sha256') writeFileSync(join(dl, name), body)
+    }
+    const idx = JSON.parse(readFileSync(join(dl, `citation-${y}.json`), 'utf-8'))
+    editions.push({
+      year: y, edition: a.release.tag_name, revision: a.rev,
+      archives: a.tags.sort((p, q) => p.rev - q.rev).map(t => t.tag),
+      published_at: a.release.published_at,
+      ranking_snapshot_date: idx.ranking_snapshot_date, evaluation_version: idx.evaluation_version,
+      ranking_methodology_version: idx.ranking_methodology_version, pnci_model_version: idx.pnci_model_version,
+      journals: idx.journals, ranked: idx.ranked,
+      index: `/downloads/rankings/citation-${y}.json`, edition_file: idx.edition_file, csv: idx.csv, csv_all: idx.csv_all,
+    })
+  }
+  writeFileSync(join(dl, 'index.json'), JSON.stringify({ latest: editions[0]?.year ?? null, editions }, null, 1))
+}
+
 let total = size(OUT)
 const pruned = []
 for (const id of snapshots) {
@@ -88,6 +149,15 @@ for (const id of snapshots) {
   rmSync(dir, { recursive: true })
   pruned.push(id)
 }
+// Then the per-category files of the oldest editions (their CSVs, index and
+// edition file stay, and every file remains in the edition's release).
+const prunedEditions = []
+for (const e of [...editions].reverse().slice(0, -1)) {
+  if (total <= BUDGET) break
+  const dl = join(OUT, 'downloads', 'rankings')
+  for (const f of readdirSync(dl).filter(f => f.startsWith(`citation-${e.year}-`) && f.endsWith('.json'))) { total -= size(join(dl, f)); rmSync(join(dl, f)) }
+  prunedEditions.push(e.year)
+}
 if (total > BUDGET) { console.error(`assemble-pages: ${mib(total)} is over the ${mib(BUDGET)} budget even after pruning snapshots`); process.exit(1) }
 
 writeFileSync(join(OUT, 'deploy.json'), JSON.stringify({
@@ -96,5 +166,8 @@ writeFileSync(join(OUT, 'deploy.json'), JSON.stringify({
   site_data: stamp,
   snapshots_served_whole: [...served].filter(id => existsSync(join(OUT, 'snapshots', id, 'collections'))).sort(),
   snapshots_without_collections: pruned,
+  ranking_editions: editions.map(e => e.edition),
+  ranking_editions_all: [...archives.values()].flatMap(a => a.tags.map(t => t.tag)).sort(),
+  ranking_editions_without_category_files: prunedEditions,
 }, null, 1))
 console.log(`assemble-pages: ${mib(total)}; site data ${stamp.format} from ${stamp.commit}${pruned.length ? `; collections left out for ${pruned.join(', ')}` : ''}`)

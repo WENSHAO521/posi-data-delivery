@@ -1,29 +1,36 @@
 #!/usr/bin/env node
-// Builds the POSI Citation Ranking download files from a snapshot, into
-// downloads/rankings/ (flat, one set per edition year):
+// Builds the files of one POSI Citation Ranking edition archive (a release
+// ranking-<year>, or ranking-<year>-r<n> for a revision; see
+// scripts/release-rankings.sh) from a snapshot's collections:
 //
+//   citation-ranking-<year>.json.gz  the edition itself, byte for byte as published
 //   citation-<year>.json             the edition's versions, thresholds and file list
 //   citation-<year>.csv              the ranked journals (official and provisional)
 //   citation-<year>-all.csv          every journal of the edition, all statuses
 //   citation-<year>-<category>.json  the journals of one PSC category ("unclassified": none)
+//   EDITION.sha256                   SHA-256 of the edition file, to tell editions apart
+//   SHA256SUMS                       checksums of every file above
 //
-// The POSI website links these files instead of building them, so its
-// deploys stay small. Output is deterministic: an unchanged edition rewrites
-// identical bytes, and git records nothing.
+// The Pages deploy serves the newest archive of each year under
+// /downloads/rankings/ (scripts/assemble-pages.mjs).
 //
-//   node scripts/build-downloads.mjs snapshots/<snapshot-id>
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+//   RANKING_TAG=ranking-2026 RANKING_REVISION=0 \
+//     node scripts/build-downloads.mjs <collections dir> <out dir>
+import { createHash } from 'crypto'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { gunzipSync } from 'zlib'
 
-const snapshot = process.argv[2]
-if (!snapshot) { console.error('usage: build-downloads.mjs snapshots/<snapshot-id>'); process.exit(1) }
-const col = name => join(snapshot, 'collections', name)
-if (!existsSync(col('citation-ranking.json.gz'))) { console.log('build-downloads: no citation-ranking.json.gz in this snapshot; nothing to build'); process.exit(0) }
+const [collections, OUT] = process.argv.slice(2)
+if (!collections || !OUT) { console.error('usage: build-downloads.mjs <collections dir> <out dir>'); process.exit(1) }
+const col = name => join(collections, name)
+if (!existsSync(col('citation-ranking.json.gz'))) { console.error(`build-downloads: no citation-ranking.json.gz in ${collections}`); process.exit(1) }
 
-const edition = JSON.parse(gunzipSync(readFileSync(col('citation-ranking.json.gz'))).toString('utf-8'))
+const editionBytes = readFileSync(col('citation-ranking.json.gz'))
+const edition = JSON.parse(gunzipSync(editionBytes).toString('utf-8'))
 const year = edition.metric_year
-const OUT = 'downloads/rankings'
+const tag = process.env.RANKING_TAG ?? `ranking-${year}`
+const revision = Number(process.env.RANKING_REVISION ?? 0)
 const BASE = '/downloads/rankings'
 const UNCLASSIFIED = 'unclassified'
 
@@ -58,6 +65,7 @@ const cols = Object.keys(row({}))
 const csv = rows => [cols.join(','), ...rows.map(o => cols.map(c => cell(o[c])).join(','))].join('\n') + '\n'
 
 const meta = {
+  edition: tag, revision,
   evaluation_version: edition.evaluation_version, ranking_methodology_version: edition.ranking_methodology_version, pnci_model_version: edition.pnci_model_version,
   zones_version: edition.zones_version, metric_year: year, ranking_snapshot_date: edition.snapshot_date, ranking_metric: 'PNCI',
   thresholds: edition.parameters ?? null,
@@ -74,6 +82,7 @@ for (const r of all) {
 mkdirSync(OUT, { recursive: true })
 const write = (name, data) => writeFileSync(join(OUT, name), data)
 const ranked = all.filter(r => r.citation_rank != null)
+copyFileSync(col('citation-ranking.json.gz'), join(OUT, `citation-ranking-${year}.json.gz`))
 write(`citation-${year}.csv`, csv(ranked))
 write(`citation-${year}-all.csv`, csv(all))
 const categories = [...cats.keys()].sort().map(k => {
@@ -84,8 +93,12 @@ const categories = [...cats.keys()].sort().map(k => {
 })
 write(`citation-${year}.json`, JSON.stringify({
   ...meta, journals: all.length, ranked: ranked.length,
+  edition_file: `${BASE}/citation-ranking-${year}.json.gz`,
   csv: `${BASE}/citation-${year}.csv`, csv_contents: 'ranked journals (official and provisional)',
   csv_all: `${BASE}/citation-${year}-all.csv`, csv_all_contents: 'every journal, all statuses',
   categories,
 }, null, 1))
-console.log(`build-downloads: citation ranking ${year}, ${all.length} journals (${ranked.length} ranked), ${categories.length} categories -> ${OUT}/`)
+const sha = b => createHash('sha256').update(b).digest('hex')
+write('EDITION.sha256', `${sha(editionBytes)}\n`)
+write('SHA256SUMS', readdirSync(OUT).filter(f => f !== 'SHA256SUMS').sort().map(f => `${sha(readFileSync(join(OUT, f)))}  ${f}`).join('\n') + '\n')
+console.log(`build-downloads: ${tag}, citation ranking ${year}, ${all.length} journals (${ranked.length} ranked), ${categories.length} categories -> ${OUT}/`)
