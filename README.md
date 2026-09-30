@@ -73,6 +73,10 @@ Each year's Citation Ranking edition is frozen as the GitHub release
 all the files above and their SHA256SUMS. A published archive is never
 replaced: if a year's edition changes later, it is published as
 `ranking-<year>-r1`, `-r2` ..., and every earlier archive stays available.
+A new format of the download files (`scripts/downloads-format.json`, recorded
+in each archive as `DOWNLOADS.format`) is published the same way, as the next
+revision with the edition file unchanged. From format 2, PCI is reported for
+Core Collection journals only; other journals have an empty `pci` field.
 `/downloads/rankings/` serves the newest archive of every year.
 
 Large collections are gzipped (gzip without a timestamp, so the same content

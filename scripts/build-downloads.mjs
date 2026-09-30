@@ -9,6 +9,7 @@
 //   citation-<year>-all.csv          every journal of the edition, all statuses
 //   citation-<year>-<category>.json  the journals of one PSC category ("unclassified": none)
 //   EDITION.sha256                   SHA-256 of the edition file, to tell editions apart
+//   DOWNLOADS.format                 the format of the files above (scripts/downloads-format.json)
 //   SHA256SUMS                       checksums of every file above
 //
 // The Pages deploy serves the newest archive of each year under
@@ -33,9 +34,12 @@ const tag = process.env.RANKING_TAG ?? `ranking-${year}`
 const revision = Number(process.env.RANKING_REVISION ?? 0)
 const BASE = '/downloads/rankings'
 const UNCLASSIFIED = 'unclassified'
+const FORMAT = JSON.parse(readFileSync(new URL('./downloads-format.json', import.meta.url), 'utf-8'))
 
-// Core Collection membership and AJR Ratings, as the POSI website shows them.
-const core = existsSync(col('core-collection.json')) ? JSON.parse(readFileSync(col('core-collection.json'), 'utf-8')) : []
+// Core Collection membership and AJR Ratings, as the POSI website shows them:
+// a record with a collection_status other than "core" is indexed, not certified.
+const core = (existsSync(col('core-collection.json')) ? JSON.parse(readFileSync(col('core-collection.json'), 'utf-8')) : [])
+  .filter(j => !j.collection_status || j.collection_status === 'core')
 const coreIds = new Set(core.map(j => j.posi_id))
 const AJR_SCALE = [['A+', 90], ['A', 85], ['A−', 80], ['B+', 75], ['B', 70], ['B−', 65], ['C+', 60], ['C', 50], ['D', 0]]
 const ajr = new Map()
@@ -44,7 +48,8 @@ for (const j of core) {
   if (!r || r.version !== 'AJR-E-1.1' || !['official', 'provisional'].includes(r.rating_status) || r.lifecycle_stage === 'mature' || r.total == null) continue
   ajr.set(j.posi_id, r.rating ?? AJR_SCALE.find(([, min]) => r.total >= min)?.[0] ?? null)
 }
-// PCI for the curated journals, when the edition has none.
+// PCI, when the edition has none. PCI is a Core Collection indicator: it is
+// written for Core Collection journals only (download format 2).
 const pci = new Map(existsSync(col('pci.json')) ? JSON.parse(readFileSync(col('pci.json'), 'utf-8')).map(r => [r.journal_id, r.pci]) : [])
 
 const catKey = r => r.ranking_category_id ?? UNCLASSIFIED
@@ -53,7 +58,7 @@ const row = r => ({
   ranking_category_id: r.ranking_category_id ?? null, pnci: r.pnci ?? null, eligible_citable_items: r.eligible_citable_items ?? null, citation_coverage: r.citation_coverage ?? null,
   citation_rank: r.citation_rank ?? null, citation_rank_total: r.citation_rank_total ?? null, citation_percentile: r.citation_percentile ?? null, citation_quartile: r.citation_quartile ?? null,
   posi_zone: r.posi_zone ?? null, zone_status: r.zone_status ?? null, citation_ranking_status: r.citation_ranking_status ?? null, ranking_status_reason: r.ranking_status_reason ?? null,
-  ajr_rating: ajr.get(r.journal_id) ?? null, lifecycle_stage: r.lifecycle_stage ?? null, pci: r.pci ?? pci.get(r.journal_id) ?? null, pcs: r.pcs ?? null,
+  ajr_rating: ajr.get(r.journal_id) ?? null, lifecycle_stage: r.lifecycle_stage ?? null, pci: coreIds.has(r.journal_id) ? r.pci ?? pci.get(r.journal_id) ?? null : null, pcs: r.pcs ?? null,
 })
 
 const all = edition.records.map(row)
@@ -69,7 +74,8 @@ const meta = {
   evaluation_version: edition.evaluation_version, ranking_methodology_version: edition.ranking_methodology_version, pnci_model_version: edition.pnci_model_version,
   zones_version: edition.zones_version, metric_year: year, ranking_snapshot_date: edition.snapshot_date, ranking_metric: 'PNCI',
   thresholds: edition.parameters ?? null,
-  note: 'Citation Quartiles and POSI Zones are based on PNCI-derived percentiles within eligible PSC categories. PCS and PCI are descriptive.',
+  downloads_format: FORMAT.format,
+  note: 'Citation Quartiles and POSI Zones are based on PNCI-derived percentiles within eligible PSC categories. PCS and PCI are descriptive. PCI is reported for Core Collection journals only.',
 }
 
 const cats = new Map()
@@ -100,5 +106,6 @@ write(`citation-${year}.json`, JSON.stringify({
 }, null, 1))
 const sha = b => createHash('sha256').update(b).digest('hex')
 write('EDITION.sha256', `${sha(editionBytes)}\n`)
+write('DOWNLOADS.format', `${FORMAT.format}\n`)
 write('SHA256SUMS', readdirSync(OUT).filter(f => f !== 'SHA256SUMS').sort().map(f => `${sha(readFileSync(join(OUT, f)))}  ${f}`).join('\n') + '\n')
 console.log(`build-downloads: ${tag}, citation ranking ${year}, ${all.length} journals (${ranked.length} ranked), ${categories.length} categories -> ${OUT}/`)

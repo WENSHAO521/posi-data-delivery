@@ -122,7 +122,7 @@ if (archives.size) {
     for (const [hash, name] of sums) {
       const body = await get(assets.get(name))
       if (createHash('sha256').update(body).digest('hex') !== hash) throw new Error(`${a.release.tag_name}/${name}: checksum differs`)
-      if (name !== 'SHA256SUMS' && name !== 'EDITION.sha256') writeFileSync(join(dl, name), body)
+      if (name !== 'SHA256SUMS' && name !== 'EDITION.sha256' && name !== 'DOWNLOADS.format') writeFileSync(join(dl, name), body)
     }
     const idx = JSON.parse(readFileSync(join(dl, `citation-${y}.json`), 'utf-8'))
     editions.push({
