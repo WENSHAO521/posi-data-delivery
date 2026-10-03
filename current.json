@@ -4,7 +4,7 @@
   "release": null,
   "latest_release": "POSI-R-2026.1",
   "latest_release_manifest": "/releases/POSI-R-2026.1/manifest.json",
-  "snapshot": "2026-10-02-2",
-  "manifest": "/snapshots/2026-10-02-2/manifest.json",
+  "snapshot": "2026-10-03",
+  "manifest": "/snapshots/2026-10-03/manifest.json",
   "note": "Points at a data snapshot updated since release POSI-R-2026.1. See manifest.json for exact provenance."
 }
