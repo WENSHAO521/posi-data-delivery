@@ -10,8 +10,8 @@ name: Sync snapshot from posi-data
 # so new data is published within minutes rather than hours. GitHub delays
 # scheduled runs and sometimes drops them, so frequent checks are also what
 # makes the chain dependable. A check with nothing new exits in seconds. "Changed" means the collection files differ (their
-# SHA-256 against the current snapshot's SHA256SUMS), so a documentation-only
-# commit in posi-data publishes nothing.
+# SHA-256 against the current snapshot's SHA256SUMS) or a component version in the
+# manifest differs, so a documentation-only commit in posi-data publishes nothing.
 #
 # Snapshot data is not kept in git: each snapshot's collection files go to a
 # GitHub release, snapshot-<id> (scripts/release-snapshots.sh), and only its
@@ -57,8 +57,8 @@ jobs:
         run: |
           set -euo pipefail
           DATA_SHA=$(git -C _posi-data rev-parse HEAD)
-          # Collection checksums posi-data would publish now, against the current snapshot's.
-          (cd _posi-data && node scripts/publish-data-snapshot.mjs --checksums-only) > "$RUNNER_TEMP/next.json"
+          # Collection checksums and component versions posi-data would publish now, against the current snapshot's.
+          (cd _posi-data && node scripts/publish-data-snapshot.mjs --checksums-only --with-versions) > "$RUNNER_TEMP/next.json"
           CHANGED=$(node scripts/collections-changed.mjs "$RUNNER_TEMP/next.json")
           if [ "$CHANGED" = "no" ]; then
             echo "posi-data $DATA_SHA: collections unchanged since $(node -p "require('./current.json').snapshot"); nothing to publish" | tee -a "$GITHUB_STEP_SUMMARY"
