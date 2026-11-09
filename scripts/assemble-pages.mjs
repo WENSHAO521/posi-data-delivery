@@ -30,6 +30,19 @@ const OUT = '_site'
 const BUDGET = 900 * 1024 * 1024
 const RECENT = 3
 const REPO = process.env.GITHUB_REPOSITORY ?? 'WENSHAO521/posi-data-delivery'
+
+// GitHub answers 502/503/504 for a minute or so now and then: retry with backoff (5, 10, 20, 40 s)
+// on a network error, a 429 or a 5xx, so one bad minute does not fail the deploy. Other answers are final.
+const BACKOFF_MS = Number(process.env.POSI_RETRY_BASE_MS ?? 5000)
+async function fetchRetry(url, init, tries = 5) {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(180_000), ...init }).catch(e => ({ ok: false, status: 0, error: e }))
+    if (res.ok || attempt >= tries || (res.status && res.status !== 429 && res.status < 500)) return res
+    const wait = BACKOFF_MS * 2 ** (attempt - 1)
+    console.warn(`assemble-pages: ${res.status || res.error?.message} ${url}; retry ${attempt} of ${tries - 1} in ${wait / 1000} s`)
+    await new Promise(r => setTimeout(r, wait))
+  }
+}
 const stamp = JSON.parse(readFileSync(stampFile, 'utf-8'))
 const size = p => statSync(p).isDirectory() ? readdirSync(p).reduce((n, f) => n + size(join(p, f)), 0) : statSync(p).size
 const mib = b => `${(b / 1048576).toFixed(0)} MiB`
@@ -64,11 +77,8 @@ for (const id of snapshots) {
     const file = join(dir, path)
     if (existsSync(file)) continue
     const url = `https://github.com/${REPO}/releases/download/snapshot-${id}/${path.slice('collections/'.length)}`
-    let body = null
-    for (let attempt = 1; attempt <= 3 && !body; attempt++) {
-      const res = await fetch(url).catch(() => null)
-      if (res?.ok) body = Buffer.from(await res.arrayBuffer())
-    }
+    const res = await fetchRetry(url)
+    const body = res.ok ? Buffer.from(await res.arrayBuffer()) : null
     if (!body || createHash('sha256').update(body).digest('hex') !== hash) {
       if (keep.has(id)) { console.error(`assemble-pages: cannot get ${url} (or its checksum differs)`); process.exit(1) }
       console.warn(`assemble-pages: skipping snapshot ${id}: cannot get ${url}`)
@@ -84,7 +94,7 @@ for (const id of snapshots) {
 // against its SHA256SUMS. Before the first archive exists, the repository's
 // downloads/ (copied above) is served as it is.
 const api = async path => {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/${path}`, { headers: { 'user-agent': 'posi-data-delivery', accept: 'application/vnd.github+json', ...(process.env.GH_TOKEN ? { authorization: `Bearer ${process.env.GH_TOKEN}` } : {}) } })
+  const res = await fetchRetry(`https://api.github.com/repos/${REPO}/${path}`, { headers: { 'user-agent': 'posi-data-delivery', accept: 'application/vnd.github+json', ...(process.env.GH_TOKEN ? { authorization: `Bearer ${process.env.GH_TOKEN}` } : {}) } })
   if (!res.ok) throw new Error(`GitHub API ${path}: ${res.status}`)
   return res.json()
 }
@@ -110,11 +120,9 @@ if (archives.size) {
   rmSync(dl, { recursive: true, force: true })
   mkdirSync(dl, { recursive: true })
   const get = async url => {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const res = await fetch(url).catch(() => null)
-      if (res?.ok) return Buffer.from(await res.arrayBuffer())
-    }
-    throw new Error(`cannot download ${url}`)
+    const res = await fetchRetry(url)
+    if (res.ok) return Buffer.from(await res.arrayBuffer())
+    throw new Error(`cannot download ${url} (${res.status || res.error?.message})`)
   }
   for (const [y, a] of [...archives].sort(([x], [z]) => z - x)) {
     const assets = new Map(a.release.assets.map(x => [x.name, x.browser_download_url]))
