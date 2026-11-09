@@ -10,8 +10,9 @@ name: Deploy data layer
 #
 # Deploys on a push to main or a dispatch; after each snapshot check (Sync
 # snapshot from posi-data) and every 20 minutes, it deploys only when this
-# repository's main or the site data differ from the live deploy.json. If the site data cannot be downloaded the deploy fails and
-# the previous one stays live.
+# repository's main or the site data differ from the live deploy.json. Downloads from GitHub retry,
+# fall back to the API, and then to the site data cached by an earlier run (see the steps below), so a
+# GitHub 504 does not fail the deploy.
 
 on:
   push:
@@ -44,17 +45,39 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v5
+        with:
+          path: repo
+
+      # Downloads go through scripts/get-site-data.sh (retries with backoff, then the GitHub API), so a
+      # GitHub 504 rarely fails a run. If GitHub stays down, a scheduled check skips (the live deploy
+      # stays and the next check in 20 minutes tries again), and a push or dispatch deploys with the last
+      # site data this workflow cached.
       - name: Decide whether to deploy
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 "$SITE_DATA/site-data-$FORMAT.json" -o stamp.json
+          if ! repo/scripts/get-site-data.sh "site-data-$FORMAT.json" stamp.json; then
+            case "${{ github.event_name }}" in
+              schedule|workflow_run)
+                echo "::warning::GitHub is not serving the site data stamp; skipping this check, the live deploy stays"
+                echo "GitHub did not serve the site data stamp; check skipped, the live deploy stays" >> "$GITHUB_STEP_SUMMARY"
+                echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            esac
+            echo "::warning::GitHub is not serving the site data stamp; deploying with the cached site data"
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The archive is identified by commit and build time: posi-engine's daily OpenAlex refresh
+          # republishes it for the same commit (new article counts and citations), which is a change too.
+          build=$(node -p "const s=require('./stamp.json'); s.commit+'@'+s.built_at")
+          echo "build=$(printf '%s' "$build" | tr ':' '-')" >> "$GITHUB_OUTPUT"
+          echo "commit=$(node -p "require('./stamp.json').commit")" >> "$GITHUB_OUTPUT"
           # Ranking archives are releases, not commits: a new one also means a deploy.
           rankings=$(gh release list -R "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft --jq '[.[] | select(.isDraft | not) | .tagName | select(test("^ranking-"))] | sort | join(",")')
-          next="$GITHUB_SHA $(node -p "require('./stamp.json').commit") $rankings"
-          live=$(curl -fsSL --retry 2 https://data.posi.panorama-sg.com/deploy.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.delivery_commit+' '+j.site_data.commit+' '+[...(j.ranking_editions_all??[])].sort().join(','))}catch{console.log('')}})" || true)
+          next="$GITHUB_SHA $build $rankings"
+          live=$(curl -fsSL --retry 2 https://data.posi.panorama-sg.com/deploy.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.delivery_commit+' '+j.site_data.commit+'@'+j.site_data.built_at+' '+[...(j.ranking_editions_all??[])].sort().join(','))}catch{console.log('')}})" || true)
           case "${{ github.event_name }}" in
             schedule|workflow_run)
               if [ "$next" = "$live" ]; then
@@ -64,24 +87,48 @@ jobs:
           esac
           echo "deploy=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v5
+      # The site data of the stamp's commit, if an earlier run cached it (no 200 MB download then), else
+      # the newest cached copy, used only if GitHub does not serve the archive.
+      - name: Restore cached site data
+        id: cache
         if: steps.decide.outputs.deploy == 'true'
+        uses: actions/cache/restore@v5
         with:
-          path: repo
+          path: site-cache
+          key: site-data-${{ env.FORMAT }}-${{ steps.decide.outputs.build || 'unknown' }}
+          restore-keys: site-data-${{ env.FORMAT }}-
 
       - name: Assemble
+        id: assemble
         if: steps.decide.outputs.deploy == 'true'
         working-directory: repo
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # The stamp is read first: if the archive is replaced in between, the
-          # newer stamp differs from the deployed one and the next check deploys again.
-          curl -fsSL --retry 3 "$SITE_DATA/site-data-$FORMAT.json" -o ../stamp.json
-          curl -fsSL --retry 3 "$SITE_DATA/site-data-$FORMAT.tar.gz" -o ../site-data.tar.gz
-          mkdir -p ../site-data && tar -xzf ../site-data.tar.gz -C ../site-data
+          if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ]; then
+            echo "Site data ${{ steps.decide.outputs.build }} from the cache"
+            cp ../site-cache/stamp.json ../stamp.json
+          elif [ -n "${{ steps.decide.outputs.build }}" ] && scripts/get-site-data.sh "site-data-$FORMAT.tar.gz" ../site-data.tar.gz; then
+            # The stamp read in the decide step names this archive; if the archive was replaced in
+            # between, the newer stamp differs from the deployed one and the next check deploys again.
+            mkdir -p ../site-cache && mv ../site-data.tar.gz ../site-cache/site-data.tar.gz && cp ../stamp.json ../site-cache/stamp.json
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          elif [ -f ../site-cache/site-data.tar.gz ]; then
+            cp ../site-cache/stamp.json ../stamp.json
+            echo "::warning::GitHub did not serve the site data; deploying the cached copy built from $(node -p "require('../stamp.json').commit")"
+          else
+            echo "::error::GitHub did not serve the site data and no cached copy exists"; exit 1
+          fi
+          mkdir -p ../site-data && tar -xzf ../site-cache/site-data.tar.gz -C ../site-data
           node scripts/assemble-pages.mjs ../site-data ../stamp.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Cache site data
+        if: steps.assemble.outputs.save == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: site-cache
+          key: site-data-${{ env.FORMAT }}-${{ steps.decide.outputs.build }}
 
       - uses: actions/configure-pages@v6
         if: steps.decide.outputs.deploy == 'true'
