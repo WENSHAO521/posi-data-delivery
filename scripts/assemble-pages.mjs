@@ -43,6 +43,53 @@ async function fetchRetry(url, init, tries = 5) {
     await new Promise(r => setTimeout(r, wait))
   }
 }
+// A release download (github.com/<owner>/<repo>/releases/download/<tag>/<name>) that still fails
+// comes through the REST API instead, a separate front end (2026-11-09: release downloads answered
+// 504 for over ten minutes while the API served the same assets).
+const ghHeaders = accept => ({ 'user-agent': 'posi-data-delivery', accept, ...(process.env.GH_TOKEN ? { authorization: `Bearer ${process.env.GH_TOKEN}` } : {}) })
+async function viaApi(url) {
+  const m = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/releases\/download\/([^/]+)\/([^/?#]+)$/)
+  if (!m) return null
+  const rel = await fetchRetry(`https://api.github.com/repos/${m[1]}/releases/tags/${m[2]}`, { headers: ghHeaders('application/vnd.github+json') }, 3)
+  if (!rel.ok) return null
+  const asset = (await rel.json()).assets?.find(a => a.name === decodeURIComponent(m[3]))
+  if (!asset) return null
+  const res = await fetchRetry(asset.url, { headers: ghHeaders('application/octet-stream') }, 3)
+  if (res.ok) console.warn(`assemble-pages: ${url} came through the GitHub API`)
+  return res.ok ? res : null
+}
+
+// Assets checked against a SHA-256 are cached by that hash in POSI_ASSET_CACHE (kept between runs
+// by actions/cache), so a served snapshot or ranking archive downloads once, and a GitHub outage
+// cannot fail the deploy for a file an earlier run already had. A hash names its content, so a
+// cached copy is never stale. Files no longer used are dropped at the end of a run.
+const CACHE = process.env.POSI_ASSET_CACHE
+const usedHashes = new Set()
+const sha256 = b => createHash('sha256').update(b).digest('hex')
+async function getAsset(url, hash) {
+  if (hash && CACHE && existsSync(join(CACHE, hash))) {
+    const b = readFileSync(join(CACHE, hash))
+    if (sha256(b) === hash) { usedHashes.add(hash); return b }
+  }
+  // An asset with no hash to check (a ranking archive's SHA256SUMS; a tag's assets do not change, a
+  // revision is a new tag) is cached by its URL, and used only when GitHub does not serve it.
+  const key = hash ?? `u-${sha256(url)}`
+  let res = await fetchRetry(url)
+  if (!res.ok) res = await viaApi(url)
+  if (!res?.ok) {
+    if (hash || !CACHE || !existsSync(join(CACHE, key))) return null
+    console.warn(`assemble-pages: ${url} from the cache`)
+    usedHashes.add(key)
+    return readFileSync(join(CACHE, key))
+  }
+  const b = Buffer.from(await res.arrayBuffer())
+  if (CACHE && (!hash || sha256(b) === hash)) {
+    mkdirSync(CACHE, { recursive: true })
+    writeFileSync(join(CACHE, key), b)
+    usedHashes.add(key)
+  }
+  return b
+}
 const stamp = JSON.parse(readFileSync(stampFile, 'utf-8'))
 const size = p => statSync(p).isDirectory() ? readdirSync(p).reduce((n, f) => n + size(join(p, f)), 0) : statSync(p).size
 const mib = b => `${(b / 1048576).toFixed(0)} MiB`
@@ -77,9 +124,8 @@ for (const id of snapshots) {
     const file = join(dir, path)
     if (existsSync(file)) continue
     const url = `https://github.com/${REPO}/releases/download/snapshot-${id}/${path.slice('collections/'.length)}`
-    const res = await fetchRetry(url)
-    const body = res.ok ? Buffer.from(await res.arrayBuffer()) : null
-    if (!body || createHash('sha256').update(body).digest('hex') !== hash) {
+    const body = await getAsset(url, hash)
+    if (!body || sha256(body) !== hash) {
       if (keep.has(id)) { console.error(`assemble-pages: cannot get ${url} (or its checksum differs)`); process.exit(1) }
       console.warn(`assemble-pages: skipping snapshot ${id}: cannot get ${url}`)
       rmSync(join(dir, 'collections'), { recursive: true, force: true })
@@ -119,16 +165,16 @@ if (archives.size) {
   const dl = join(OUT, 'downloads', 'rankings')
   rmSync(dl, { recursive: true, force: true })
   mkdirSync(dl, { recursive: true })
-  const get = async url => {
-    const res = await fetchRetry(url)
-    if (res.ok) return Buffer.from(await res.arrayBuffer())
-    throw new Error(`cannot download ${url} (${res.status || res.error?.message})`)
+  const get = async (url, hash) => {
+    const b = await getAsset(url, hash)
+    if (b) return b
+    throw new Error(`cannot download ${url}`)
   }
   for (const [y, a] of [...archives].sort(([x], [z]) => z - x)) {
     const assets = new Map(a.release.assets.map(x => [x.name, x.browser_download_url]))
     const sums = (await get(assets.get('SHA256SUMS'))).toString('utf-8').trim().split('\n').map(l => l.trim().split(/\s+/))
     for (const [hash, name] of sums) {
-      const body = await get(assets.get(name))
+      const body = await get(assets.get(name), hash)
       if (createHash('sha256').update(body).digest('hex') !== hash) throw new Error(`${a.release.tag_name}/${name}: checksum differs`)
       if (name !== 'SHA256SUMS' && name !== 'EDITION.sha256' && name !== 'DOWNLOADS.format') writeFileSync(join(dl, name), body)
     }
@@ -178,4 +224,5 @@ writeFileSync(join(OUT, 'deploy.json'), JSON.stringify({
   ranking_editions_all: [...archives.values()].flatMap(a => a.tags.map(t => t.tag)).sort(),
   ranking_editions_without_category_files: prunedEditions,
 }, null, 1))
+if (CACHE && existsSync(CACHE)) for (const f of readdirSync(CACHE)) if (!usedHashes.has(f)) rmSync(join(CACHE, f), { force: true })
 console.log(`assemble-pages: ${mib(total)}; site data ${stamp.format} from ${stamp.commit}${pruned.length ? `; collections left out for ${pruned.join(', ')}` : ''}`)

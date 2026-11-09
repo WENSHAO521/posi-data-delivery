@@ -98,12 +98,23 @@ jobs:
           key: site-data-${{ env.FORMAT }}-${{ steps.decide.outputs.build || 'unknown' }}
           restore-keys: site-data-${{ env.FORMAT }}-
 
+      # Snapshot collections and ranking archives, cached by SHA-256 (scripts/assemble-pages.mjs): each
+      # downloads once, and a GitHub outage cannot fail a deploy for a file an earlier run had.
+      - name: Restore cached release assets
+        if: steps.decide.outputs.deploy == 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: asset-cache
+          key: release-assets-${{ github.run_id }}
+          restore-keys: release-assets-
+
       - name: Assemble
         id: assemble
         if: steps.decide.outputs.deploy == 'true'
         working-directory: repo
         env:
           GH_TOKEN: ${{ github.token }}
+          POSI_ASSET_CACHE: ${{ github.workspace }}/asset-cache
         run: |
           set -euo pipefail
           if [ "${{ steps.cache.outputs.cache-hit }}" = "true" ]; then
@@ -122,6 +133,13 @@ jobs:
           fi
           mkdir -p ../site-data && tar -xzf ../site-cache/site-data.tar.gz -C ../site-data
           node scripts/assemble-pages.mjs ../site-data ../stamp.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Cache release assets
+        if: steps.decide.outputs.deploy == 'true' && hashFiles('asset-cache/*') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: asset-cache
+          key: release-assets-${{ hashFiles('asset-cache/*') }}
 
       - name: Cache site data
         if: steps.assemble.outputs.save == 'true'
