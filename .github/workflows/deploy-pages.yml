@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 30
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -157,7 +157,21 @@ jobs:
           path: repo/_site
           include-hidden-files: true   # v3 kept dotfiles (.nojekyll); v4+ drops them unless asked
 
+      # The artifact API is eventually consistent: deploy-pages sometimes asks
+      # for "github-pages" half a second after the upload finalized and gets
+      # "Found 0 artifact(s)" (run 44890430004, 2026-11-21). Wait and try again
+      # instead of failing the whole run.
       - name: Deploy
         id: deployment
         if: steps.decide.outputs.deploy == 'true'
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - name: Wait before retrying deploy
+        if: steps.decide.outputs.deploy == 'true' && steps.deployment.outcome == 'failure'
+        run: sleep 30
+
+      - name: Deploy (retry)
+        id: deployment_retry
+        if: steps.decide.outputs.deploy == 'true' && steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v5
